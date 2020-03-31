@@ -145,6 +145,7 @@ class Net(nn.Module):
         g_t = self.decoder(t)
         g_t_feats = self.encode_with_intermediate(g_t)
 
+
         loss_c = self.calc_content_loss(g_t_feats[-1], t)
         loss_s = self.calc_style_loss(g_t_feats[0], style_feats[0])
         for i in range(1, 4):
