@@ -70,7 +70,7 @@ parser.add_argument('--log_dir', default='./logs',
                     help='Directory to save the log')
 parser.add_argument('--lr', type=float, default=1e-4)
 parser.add_argument('--lr_decay', type=float, default=5e-5)
-parser.add_argument('--max_iter', type=int, default=160000)
+parser.add_argument('--max_iter', type=int, default=100000)
 parser.add_argument('--batch_size', type=int, default=8)
 parser.add_argument('--style_weight', type=float, default=10.0)
 parser.add_argument('--content_weight', type=float, default=1.0)
@@ -79,6 +79,7 @@ parser.add_argument('--save_model_interval', type=int, default=10000)
 args = parser.parse_args()
 
 device = torch.device('cuda')
+torch.backends.cudnn.benchmark = False
 save_dir = Path(args.save_dir)
 save_dir.mkdir(exist_ok=True, parents=True)
 log_dir = Path(args.log_dir)
