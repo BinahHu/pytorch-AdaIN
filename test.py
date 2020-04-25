@@ -8,7 +8,7 @@ from torchvision import transforms
 from torchvision.utils import save_image
 
 import net
-from function import adaptive_instance_normalization, coral
+from function import adaptive_instance_normalization, adaptive_instance_normalization_cat, adaptive_instance_normalization_cat_color, coral
 
 
 def test_transform(size, crop):
@@ -22,11 +22,12 @@ def test_transform(size, crop):
     return transform
 
 
-def style_transfer(vgg, decoder, content, style, alpha=1.0,
+def style_transfer(vgg, decoder, ias, content, style, aest, alpha=1.0,
                    interpolation_weights=None):
     assert (0.0 <= alpha <= 1.0)
     content_f = vgg(content)
     style_f = vgg(style)
+    aest_f = ias.predict_color(vgg(aest))
     if interpolation_weights:
         _, C, H, W = content_f.size()
         feat = torch.FloatTensor(1, C, H, W).zero_().to(device)
@@ -35,8 +36,9 @@ def style_transfer(vgg, decoder, content, style, alpha=1.0,
             feat = feat + w * base_feat[i:i + 1]
         content_f = content_f[0:1]
     else:
-        feat = adaptive_instance_normalization(content_f, style_f)
-    feat = feat * alpha + content_f * (1 - alpha)
+        feat = adaptive_instance_normalization_cat_color(content_f, style_f, aest_f)
+        #feat = adaptive_instance_normalization_cat(content_f, aest_f)
+    # feat = feat * alpha + content_f * (1 - alpha)
     return decoder(feat)
 
 
@@ -46,6 +48,10 @@ parser.add_argument('--content', type=str,
                     help='File path to the content image')
 parser.add_argument('--content_dir', type=str,
                     help='Directory path to a batch of content images')
+parser.add_argument('--aest', type=str,
+                    help='File path to the aest image')
+parser.add_argument('--aest_dir', type=str,
+                    help='Directory path to a batch of Aesthetic images')
 parser.add_argument('--style', type=str,
                     help='File path to the style image, or multiple style \
                     images separated by commas if you want to do style \
@@ -54,6 +60,7 @@ parser.add_argument('--style_dir', type=str,
                     help='Directory path to a batch of style images')
 parser.add_argument('--vgg', type=str, default='models/vgg_normalised.pth')
 parser.add_argument('--decoder', type=str, default='models/decoder.pth')
+parser.add_argument('--ias', type=str, default='models/ias.pth')
 
 # Additional options
 parser.add_argument('--content_size', type=int, default=512,
@@ -61,6 +68,9 @@ parser.add_argument('--content_size', type=int, default=512,
                     keeping the original size if set to 0')
 parser.add_argument('--style_size', type=int, default=512,
                     help='New (minimum) size for the style image, \
+                    keeping the original size if set to 0')
+parser.add_argument('--aest_size', type=int, default=512,
+                    help='New (minimum) size for the Aesthetic image, \
                     keeping the original size if set to 0')
 parser.add_argument('--crop', action='store_true',
                     help='do center crop to create squared image')
@@ -96,6 +106,14 @@ else:
     content_dir = Path(args.content_dir)
     content_paths = [f for f in content_dir.glob('*')]
 
+# Either --aest or --aestDir should be given.
+assert (args.aest or args.aest_dir)
+if args.aest:
+    aest_paths = [Path(args.aest)]
+else:
+    aest_dir = Path(args.aest_dir)
+    aest_paths = [f for f in aest_dir.glob('*')]
+
 # Either --style or --styleDir should be given.
 assert (args.style or args.style_dir)
 if args.style:
@@ -114,19 +132,25 @@ else:
 
 decoder = net.decoder
 vgg = net.vgg
+ias = net.ias
 
 decoder.eval()
 vgg.eval()
+ias.eval()
 
 decoder.load_state_dict(torch.load(args.decoder))
 vgg.load_state_dict(torch.load(args.vgg))
 vgg = nn.Sequential(*list(vgg.children())[:31])
+ias.load_state_dict(torch.load(args.ias))
 
 vgg.to(device)
 decoder.to(device)
+ias.to(device)
 
 content_tf = test_transform(args.content_size, args.crop)
 style_tf = test_transform(args.style_size, args.crop)
+aest_tf = test_transform(args.aest_size, args.crop)
+
 
 for content_path in content_paths:
     if do_interpolation:  # one content image, N style image
@@ -145,17 +169,20 @@ for content_path in content_paths:
 
     else:  # process one content and one style
         for style_path in style_paths:
-            content = content_tf(Image.open(str(content_path)))
-            style = style_tf(Image.open(str(style_path)))
-            if args.preserve_color:
-                style = coral(style, content)
-            style = style.to(device).unsqueeze(0)
-            content = content.to(device).unsqueeze(0)
-            with torch.no_grad():
-                output = style_transfer(vgg, decoder, content, style,
-                                        args.alpha)
-            output = output.cpu()
+            for aest_path in aest_paths:
+                content = content_tf(Image.open(str(content_path)))
+                style = style_tf(Image.open(str(style_path)))
+                aest = aest_tf(Image.open(str(aest_path)))
+                if args.preserve_color:
+                    style = coral(style, content)
+                style = style.to(device).unsqueeze(0)
+                content = content.to(device).unsqueeze(0)
+                aest = aest.to(device).unsqueeze(0)
+                with torch.no_grad():
+                    output = style_transfer(vgg, decoder, ias, content, style, aest,
+                                            args.alpha)
+                output = output.cpu()
 
-            output_name = output_dir / '{:s}_stylized_{:s}{:s}'.format(
-                content_path.stem, style_path.stem, args.save_ext)
-            save_image(output, str(output_name))
+                output_name = output_dir / '{:s}_stylized_{:s}{:s}{:s}'.format(
+                    content_path.stem, style_path.stem, aest_path.stem, args.save_ext)
+                save_image(output, str(output_name))

@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 import net
 from sampler import InfiniteSamplerWrapper
+import os
 
 cudnn.benchmark = True
 Image.MAX_IMAGE_PIXELS = None  # Disable DecompressionBombError
@@ -61,44 +62,54 @@ parser.add_argument('--content_dir', type=str, required=True,
                     help='Directory path to a batch of content images')
 parser.add_argument('--style_dir', type=str, required=True,
                     help='Directory path to a batch of style images')
+parser.add_argument('--aest_dir', type=str, required=True,
+                    help='Directory path to a batch of Aesthetic images')
 parser.add_argument('--vgg', type=str, default='models/vgg_normalised.pth')
+parser.add_argument('--ias', type=str, default='models/ias.pth')
 
 # training options
 parser.add_argument('--save_dir', default='./experiments',
                     help='Directory to save the model')
 parser.add_argument('--log_dir', default='./logs',
                     help='Directory to save the log')
+parser.add_argument('--name', default='hope',
+                    help='Name of this model')
 parser.add_argument('--lr', type=float, default=1e-4)
 parser.add_argument('--lr_decay', type=float, default=5e-5)
 parser.add_argument('--max_iter', type=int, default=160000)
 parser.add_argument('--batch_size', type=int, default=8)
 parser.add_argument('--style_weight', type=float, default=10.0)
 parser.add_argument('--content_weight', type=float, default=1.0)
+parser.add_argument('--aest_weight', type=float, default=10.0)
 parser.add_argument('--n_threads', type=int, default=16)
 parser.add_argument('--save_model_interval', type=int, default=10000)
 args = parser.parse_args()
 
 device = torch.device('cuda')
-save_dir = Path(args.save_dir)
+save_dir = Path(os.path.join(args.save_dir, args.name))
 save_dir.mkdir(exist_ok=True, parents=True)
-log_dir = Path(args.log_dir)
+log_dir = Path(os.path.join(args.log_dir, args.name))
 log_dir.mkdir(exist_ok=True, parents=True)
 writer = SummaryWriter(log_dir=str(log_dir))
 
 decoder = net.decoder
 vgg = net.vgg
+ias = net.ias
 
 vgg.load_state_dict(torch.load(args.vgg))
 vgg = nn.Sequential(*list(vgg.children())[:31])
-network = net.Net(vgg, decoder)
+ias.load_state_dict(torch.load(args.ias))
+network = net.Net(vgg, decoder, ias)
 network.train()
 network.to(device)
 
 content_tf = train_transform()
 style_tf = train_transform()
+aest_tf = train_transform()
 
 content_dataset = FlatFolderDataset(args.content_dir, content_tf)
 style_dataset = FlatFolderDataset(args.style_dir, style_tf)
+aest_dataset = FlatFolderDataset(args.aest_dir, aest_tf)
 
 content_iter = iter(data.DataLoader(
     content_dataset, batch_size=args.batch_size,
@@ -108,6 +119,10 @@ style_iter = iter(data.DataLoader(
     style_dataset, batch_size=args.batch_size,
     sampler=InfiniteSamplerWrapper(style_dataset),
     num_workers=args.n_threads))
+aest_iter = iter(data.DataLoader(
+    aest_dataset, batch_size=args.batch_size,
+    sampler=InfiniteSamplerWrapper(aest_dataset),
+    num_workers=args.n_threads))
 
 optimizer = torch.optim.Adam(network.decoder.parameters(), lr=args.lr)
 
@@ -115,10 +130,14 @@ for i in tqdm(range(args.max_iter)):
     adjust_learning_rate(optimizer, iteration_count=i)
     content_images = next(content_iter).to(device)
     style_images = next(style_iter).to(device)
-    loss_c, loss_s = network(content_images, style_images)
+    aest_images = next(aest_iter).to(device)
+    loss_c, loss_s, loss_a = network(content_images, style_images, aest_images)
+    #loss_c, loss_a = network(content_images, aest_images)
     loss_c = args.content_weight * loss_c
     loss_s = args.style_weight * loss_s
-    loss = loss_c + loss_s
+    loss_a = args.aest_weight * loss_a
+    loss = loss_c + loss_s + loss_a
+    #loss = loss_c + loss_a
 
     optimizer.zero_grad()
     loss.backward()
@@ -126,6 +145,7 @@ for i in tqdm(range(args.max_iter)):
 
     writer.add_scalar('loss_content', loss_c.item(), i + 1)
     writer.add_scalar('loss_style', loss_s.item(), i + 1)
+    writer.add_scalar('loss_aest', loss_a.item(), i + 1)
 
     if (i + 1) % args.save_model_interval == 0 or (i + 1) == args.max_iter:
         state_dict = net.decoder.state_dict()
