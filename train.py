@@ -38,8 +38,9 @@ class FlatFolderDataset(data.Dataset):
 
     def __getitem__(self, index):
         path = self.paths[index]
-        img = Image.open(str(path)).convert('RGB')
+        img = Image.open(str(path)).convert('L')
         img = self.transform(img)
+        img = img.repeat(3, 1, 1)
         return img
 
     def __len__(self):
@@ -65,7 +66,7 @@ parser.add_argument('--style_dir', type=str, required=True,
 parser.add_argument('--aest_dir', type=str, required=True,
                     help='Directory path to a batch of Aesthetic images')
 parser.add_argument('--vgg', type=str, default='models/vgg_normalised.pth')
-parser.add_argument('--ias', type=str, default='models/ias.pth')
+parser.add_argument('--ias', type=str, default='models/ias_color.pth')
 
 # training options
 parser.add_argument('--save_dir', default='./experiments',

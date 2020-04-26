@@ -60,7 +60,7 @@ parser.add_argument('--style_dir', type=str,
                     help='Directory path to a batch of style images')
 parser.add_argument('--vgg', type=str, default='models/vgg_normalised.pth')
 parser.add_argument('--decoder', type=str, default='models/decoder.pth')
-parser.add_argument('--ias', type=str, default='models/ias.pth')
+parser.add_argument('--ias', type=str, default='models/ias_color.pth')
 
 # Additional options
 parser.add_argument('--content_size', type=int, default=512,
@@ -171,7 +171,7 @@ for content_path in content_paths:
         for style_path in style_paths:
             for aest_path in aest_paths:
                 content = content_tf(Image.open(str(content_path)))
-                style = style_tf(Image.open(str(style_path)))
+                style = style_tf(Image.open(str(style_path)).convert('L')).repeat(3, 1, 1)
                 aest = aest_tf(Image.open(str(aest_path)))
                 if args.preserve_color:
                     style = coral(style, content)
