@@ -1,60 +1,25 @@
 import argparse
-from pathlib import Path
+import os
 
 import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.utils.data as data
-from PIL import Image, ImageFile
-from tensorboardX import SummaryWriter
-from torchvision import transforms
-from tqdm import tqdm
 
-import net
+from tensorboardX import SummaryWriter
+from tqdm import tqdm
+from pathlib import Path
 from sampler import InfiniteSamplerWrapper
-import os
+
+from net import Net, vgg, decoder
+from datasets import ColorDataset, GrayDataset, train_transform
+from util import adjust_learning_rate, zero_grad
 
 cudnn.benchmark = True
-Image.MAX_IMAGE_PIXELS = None  # Disable DecompressionBombError
-# Disable OSError: image file is truncated
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-def train_transform():
-    transform_list = [
-        transforms.Resize(size=(512, 512)),
-        transforms.RandomCrop(256),
-        transforms.ToTensor()
-    ]
-    return transforms.Compose(transform_list)
 
 
-class FlatFolderDataset(data.Dataset):
-    def __init__(self, root, transform):
-        super(FlatFolderDataset, self).__init__()
-        self.root = root
-        self.paths = list(Path(self.root).glob('*'))
-        self.transform = transform
-
-    def __getitem__(self, index):
-        path = self.paths[index]
-        img = Image.open(str(path)).convert('L')
-        img = self.transform(img)
-        img = img.repeat(3, 1, 1)
-        return img
-
-    def __len__(self):
-        return len(self.paths)
-
-    def name(self):
-        return 'FlatFolderDataset'
-
-
-def adjust_learning_rate(optimizer, iteration_count):
-    """Imitating the original implementation"""
-    lr = args.lr / (1.0 + args.lr_decay * iteration_count)
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
 
 
 parser = argparse.ArgumentParser()
@@ -93,14 +58,14 @@ log_dir = Path(os.path.join(args.log_dir, args.name))
 log_dir.mkdir(exist_ok=True, parents=True)
 writer = SummaryWriter(log_dir=str(log_dir))
 
-decoder = net.decoder
-vgg = net.vgg
-ias = net.ias
 
 vgg.load_state_dict(torch.load(args.vgg))
 vgg = nn.Sequential(*list(vgg.children())[:31])
-ias.load_state_dict(torch.load(args.ias))
-network = net.Net(vgg, decoder, ias)
+network = Net(vgg, decoder, args)
+
+
+network.ias.load_state_dict(torch.load(args.ias))
+
 network.train()
 network.to(device)
 
@@ -108,9 +73,9 @@ content_tf = train_transform()
 style_tf = train_transform()
 aest_tf = train_transform()
 
-content_dataset = FlatFolderDataset(args.content_dir, content_tf)
-style_dataset = FlatFolderDataset(args.style_dir, style_tf)
-aest_dataset = FlatFolderDataset(args.aest_dir, aest_tf)
+content_dataset = GrayDataset(args.content_dir, content_tf)
+style_dataset = GrayDataset(args.style_dir, style_tf)
+aest_dataset = ColorDataset(args.aest_dir, aest_tf)
 
 content_iter = iter(data.DataLoader(
     content_dataset, batch_size=args.batch_size,
@@ -125,31 +90,45 @@ aest_iter = iter(data.DataLoader(
     sampler=InfiniteSamplerWrapper(aest_dataset),
     num_workers=args.n_threads))
 
-optimizer = torch.optim.Adam(network.decoder.parameters(), lr=args.lr)
+opt_dec = torch.optim.Adam(network.decoder.parameters(), lr=args.lr)
+opt_gen = torch.optim.Adam(network.generator.parameters(), lr=args.lr)
+opt_dis = torch.optim.Adam(network.discriminator.parameters(), lr=args.lr)
+
+opts = [opt_dec, opt_gen, opt_dis]
 
 for i in tqdm(range(args.max_iter)):
-    adjust_learning_rate(optimizer, iteration_count=i)
+    # S1: Adjust lr and prepare data
+    adjust_learning_rate(opts, iteration_count=i, args=args)
     content_images = next(content_iter).to(device)
     style_images = next(style_iter).to(device)
-    aest_images = next(aest_iter).to(device)
-    loss_c, loss_s, loss_a = network(content_images, style_images, aest_images)
-    #loss_c, loss_a = network(content_images, aest_images)
+    aest_images, real_l_images, real_ab_images = next(aest_iter)
+    aest_images = aest_images.to(device)
+    real_l_images = real_l_images.to(device)
+    real_ab_images = real_ab_images.to(device)
+
+    # S2: Train decoder
+    loss_c, loss_s, fake_imgs = network(content_images, style_images, aest_images)
     loss_c = args.content_weight * loss_c
     loss_s = args.style_weight * loss_s
-    loss_a = args.aest_weight * loss_a
-    loss = loss_c + loss_s + loss_a
-    #loss = loss_c + loss_a
+    loss_dec = loss_c + loss_s
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+    zero_grad(opts)
+    loss_dec.backward()
+    opt_dec.step()
+
+    # S3: Train discriminator
+    color_feat = network.get_color_feat(aest_images)
+
+    # S4: Train generator
+
+    # S5: Summary loss and save models
 
     writer.add_scalar('loss_content', loss_c.item(), i + 1)
     writer.add_scalar('loss_style', loss_s.item(), i + 1)
-    writer.add_scalar('loss_aest', loss_a.item(), i + 1)
+    writer.add_scalar('loss_dec', loss_dec.item(), i + 1)
 
     if (i + 1) % args.save_model_interval == 0 or (i + 1) == args.max_iter:
-        state_dict = net.decoder.state_dict()
+        state_dict = decoder.state_dict()
         for key in state_dict.keys():
             state_dict[key] = state_dict[key].to(torch.device('cpu'))
         torch.save(state_dict, save_dir /
