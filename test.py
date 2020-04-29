@@ -27,7 +27,8 @@ def style_transfer(vgg, decoder, ias, content, style, aest, alpha=1.0,
     assert (0.0 <= alpha <= 1.0)
     content_f = vgg(content)
     style_f = vgg(style)
-    aest_f = ias.predict_color(vgg(aest))
+    #aest_f = ias.predict_color(vgg(aest))
+    aest_f = vgg(aest)
     if interpolation_weights:
         _, C, H, W = content_f.size()
         feat = torch.FloatTensor(1, C, H, W).zero_().to(device)

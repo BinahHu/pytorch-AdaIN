@@ -43,12 +43,15 @@ def adaptive_instance_normalization_cat_color(content_feat, style_feat, aest_fea
     size = content_feat.size()
     style_mean, style_std = calc_mean_std(style_feat)
     content_mean, content_std = calc_mean_std(content_feat)
-    aest_feat_expand = aest_feat.view(size[0], -1, 1, 1).expand(size[0], 15, size[2], size[3])
+    aest_mean, aest_std = calc_mean_std(aest_feat)
+    #aest_feat_expand = aest_feat.view(size[0], -1, 1, 1).expand(size[0], 15, size[2], size[3])
 
     normalized_feat = (content_feat - content_mean.expand(
         size)) / content_std.expand(size)
-    tmp = torch.cat((normalized_feat, style_std.expand(size)), dim=1)
-    return torch.cat((tmp, aest_feat_expand), dim=1)
+    colorized_feat = normalized_feat * aest_std.expand(size) + aest_mean.expand(size)
+    return torch.cat((colorized_feat, style_std.expand(size)), dim=1)
+    #tmp = torch.cat((normalized_feat, style_std.expand(size)), dim=1)
+    #return torch.cat((tmp, aest_feat_expand), dim=1)
 
 
 def _calc_feat_flatten_mean_std(feat):

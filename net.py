@@ -11,7 +11,7 @@ import numpy as np
 
 decoder = nn.Sequential(
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512*2 + 15, 512, (3, 3)),
+    nn.Conv2d(512*2, 512, (3, 3)),
     nn.ReLU(),
     nn.ReflectionPad2d((1, 1, 1, 1)),
     nn.Conv2d(512, 256, (3, 3)),
@@ -222,7 +222,7 @@ class Net(nn.Module):
         content_feat = self.encode(content)
         aest_feat = self.encode(aest)
         aest_color = self.ias.predict_color(aest_feat)
-        t = adain_cat(content_feat, style_feats[-1], aest_color)
+        t = adain_cat(content_feat, style_feats[-1], aest_feat)
         #t = adain_cat(content_feat, aest_feat)
         #t0 = adain(content_feat, style_feats[-1])
         #t0 = alpha * t0 + (1 - alpha) * content_feat
