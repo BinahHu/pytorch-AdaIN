@@ -7,37 +7,72 @@ import torch.nn.functional as F
 
 class unet_generator(nn.Module):
 
-    def __init__(self, input_nc, output_nc, ngf, color_dim=313):
+    def __init__(self, input_nc, output_nc, ngf):
         super(unet_generator, self).__init__()
 
         self.e1 = nn.Conv2d(input_nc, ngf, 4, 2, 1)
         self.e2 = unet_encoder_block(ngf, ngf * 2)
         self.e3 = unet_encoder_block(ngf * 2, ngf * 4)
         self.e4 = unet_encoder_block(ngf * 4, ngf * 8)
-        self.e5 = unet_encoder_block(ngf * 8, ngf * 8)
-        self.e6 = unet_encoder_block(ngf * 8, ngf * 8)
-        self.e7 = unet_encoder_block(ngf * 8, ngf * 8)
-        self.e8 = unet_encoder_block(ngf * 8, ngf * 8, norm=None)
+        #self.e5 = unet_encoder_block(ngf * 8, ngf * 8)
+        #self.e6 = unet_encoder_block(ngf * 8, ngf * 8)
+        #self.e7 = unet_encoder_block(ngf * 8, ngf * 8)
+        #self.e8 = unet_encoder_block(ngf * 8, ngf * 8)
 
-        self.d1 = unet_decoder_block(ngf * 8, ngf * 8)
-        self.d2 = unet_decoder_block(ngf * 8 * 2, ngf * 8)
-        self.d3 = unet_decoder_block(ngf * 8 * 2, ngf * 8)
-        self.d4 = unet_decoder_block(ngf * 8 * 2, ngf * 8, drop_out=None)
-        self.d5 = unet_decoder_block(ngf * 8 * 2, ngf * 4, drop_out=None)
-        self.d6 = unet_decoder_block(ngf * 4 * 2, ngf * 2, drop_out=None)
-        self.d7 = unet_decoder_block(ngf * 2 * 2, ngf, drop_out=None)
-        self.d8 = unet_decoder_block(ngf * 2, output_nc, norm=None, drop_out=None)
-        self.tanh = nn.Tanh()
+        self.d1 = unet_decoder_block(ngf * 8, ngf * 4)
+        self.d2 = unet_decoder_block(ngf * 4 * 2, ngf * 2)
+        self.d3 = unet_decoder_block(ngf * 2 * 2, ngf)
+        self.d4 = unet_decoder_block(ngf * 2, output_nc, norm=None, drop_out=None)
+        #self.d1 = unet_decoder_block(ngf * 8, ngf * 8)
+        #self.d2 = unet_decoder_block(ngf * 8 * 2, ngf * 8)
+        #self.d3 = unet_decoder_block(ngf * 8 * 2, ngf * 8)
+        #self.d4 = unet_decoder_block(ngf * 8 * 2, ngf * 8, drop_out=None)
+        #self.d5 = unet_decoder_block(ngf * 8 * 2, ngf * 4, drop_out=None)
+        #self.d6 = unet_decoder_block(ngf * 4 * 2, ngf * 2, drop_out=None)
+        #self.d7 = unet_decoder_block(ngf * 2 * 2, ngf, drop_out=None)
+        #self.d8 = unet_decoder_block(ngf * 2, output_nc, norm=None, drop_out=None)
+        self.sigmoid = nn.Sigmoid()
 
-        self.layers = [self.e1, self.e2, self.e3, self.e4, self.e5, self.e6, self.e7, self.e8,
-                       self.d1, self.d2, self.d3, self.d4, self.d5, self.d6, self.d7, self.d8]
+        #self.layers = [self.e1, self.e2, self.e3, self.e4, self.e5, self.e6, self.e7, self.e8,
+        #               self.d1, self.d2, self.d3, self.d4, self.d5, self.d6, self.d7, self.d8]
+        self.layers = [self.e1, self.e2, self.e3, self.e4, self.d1, self.d2, self.d3, self.d4]
 
-        self.mlp = MLP(color_dim, self.get_num_adain_params(self.layers), self.get_num_adain_params(self.layers), 3)
+        self.mlp = MLP(ngf * 8 * 2, self.get_num_adain_params(self.layers), self.get_num_adain_params(self.layers), 3)
 
-    def forward(self, x, color_feat):
+    def encode(self, x):
+        e1 = self.e1(x)
+        e2 = self.e2(e1)
+        e3 = self.e3(e2)
+        e4 = self.e4(e3)
+        #e5 = self.e5(e4)
+        #e6 = self.e6(e5)
+        #e7 = self.e7(e6)
+        #e8 = self.e8(e7)
+        return e4
+
+    def encode_with_intermediate(self, x):
+        results = [x]
+        for i in range(4):
+            func = getattr(self, 'e{:d}'.format(i + 1))
+            results.append(func(results[-1]))
+        return results[1:]
+
+    def calc_mean_std_feat(self, feat, eps=1e-5):
+        # eps is a small value added to the variance to avoid divide-by-zero.
+        size = feat.size()
+        assert (len(size) == 4)
+        N, C = size[:2]
+        feat_var = feat.view(N, C, -1).var(dim=2) + eps
+        feat_std = feat_var.sqrt().view(N, C)
+        feat_mean = feat.view(N, C, -1).mean(dim=2).view(N, C)
+        feat_cat = torch.cat([feat_mean, feat_std], dim=1).view(N, -1)
+        return feat_cat
+
+    def forward(self, x, ref_img):
 
         ### AdaIn params
-        adain_params = self.mlp(color_feat)
+        ref_feat = self.calc_mean_std_feat(self.encode(ref_img))
+        adain_params = self.mlp(ref_feat)
         self.assign_adain_params(adain_params, self.layers)
 
         ### Encoder
@@ -45,36 +80,38 @@ class unet_generator(nn.Module):
         e2 = self.e2(e1)
         e3 = self.e3(e2)
         e4 = self.e4(e3)
-        e5 = self.e5(e4)
-        e6 = self.e6(e5)
-        e7 = self.e7(e6)
-        e8 = self.e8(e7)
+        #e5 = self.e5(e4)
+        #e6 = self.e6(e5)
+        #e7 = self.e7(e6)
+        #e8 = self.e8(e7)
 
         ### Decoder
-        d1_ = self.d1(e8)
-        d1 = torch.cat([d1_, e7], dim=1)
+        d1_ = self.d1(e4)
+        d1 = torch.cat([d1_, e3], dim=1)
 
         d2_ = self.d2(d1)
-        d2 = torch.cat([d2_, e6], dim=1)
+        d2 = torch.cat([d2_, e2], dim=1)
 
         d3_ = self.d3(d2)
-        d3 = torch.cat([d3_, e5], dim=1)
+        d3 = torch.cat([d3_, e1], dim=1)
 
-        d4_ = self.d4(d3)
-        d4 = torch.cat([d4_, e4], dim=1)
+        d4 = self.d4(d3)
 
-        d5_ = self.d5(d4)
-        d5 = torch.cat([d5_, e3], dim=1)
+        #d4_ = self.d4(d3)
+        #d4 = torch.cat([d4_, e4], dim=1)
 
-        d6_ = self.d6(d5)
-        d6 = torch.cat([d6_, e2], dim=1)
+        #d5_ = self.d5(d4)
+        #d5 = torch.cat([d5_, e3], dim=1)
 
-        d7_ = self.d7(d6)
-        d7 = torch.cat([d7_, e1], dim=1)
+        #d6_ = self.d6(d5)
+        #d6 = torch.cat([d6_, e2], dim=1)
 
-        d8 = self.d8(d7)
+        #d7_ = self.d7(d6)
+        #d7 = torch.cat([d7_, e1], dim=1)
 
-        output = self.tanh(d8)
+        #d8 = self.d8(d7)
+
+        output = self.sigmoid(d4)
 
         return output
 
@@ -102,7 +139,7 @@ class unet_generator(nn.Module):
 
 class unet_encoder_block(nn.Module):
 
-    def __init__(self, input_nc, output_nc, ks=4, stride=2, padding=1, norm='adain',
+    def __init__(self, input_nc, output_nc, ks=4, stride=2, padding=1, norm=None,
                  act=nn.LeakyReLU(inplace=True, negative_slope=0.2)):
         super(unet_encoder_block, self).__init__()
         self.conv = nn.Conv2d(input_nc, output_nc, ks, stride, padding)
