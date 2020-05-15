@@ -30,7 +30,7 @@ def train(args):
 
     content_dataset = ColorDataset(args.content_dir, args.img_size)
     style_dataset = ColorDataset(args.style_dir, args.img_size, gray_only=True)
-    aest_dataset = ColorDataset(args.aest_dir, args.img_size, return_rgb=True)
+    aest_dataset = ColorDataset(args.aest_dir, args.img_size)
 
     content_iter = iter(data.DataLoader(
         content_dataset, batch_size=args.batch_size,
@@ -68,7 +68,7 @@ def train(args):
 
         content_l, content_ab = [x.to(device) for x in next(content_iter)]
         style_l = next(style_iter).to(device)
-        aest_l, aest_ab, aest_rgb = [x.to(device) for x in next(aest_iter)]
+        aest_l, aest_ab = [x.to(device) for x in next(aest_iter)]
 
         # S2: Forward
 

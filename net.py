@@ -3,7 +3,6 @@ from function import calc_mean_std
 from function import adaptive_instance_normalization as adain
 import torch
 
-from subnets.IAS import IAS
 from subnets.vgg import vgg
 from subnets.decoder import decoder_L, decoder_AB
 
@@ -20,10 +19,7 @@ class Net(nn.Module):
         self.enc_3 = nn.Sequential(*enc_layers[11:18])  # relu2_1 -> relu3_1
         self.enc_4 = nn.Sequential(*enc_layers[18:31])  # relu3_1 -> relu4_1
 
-        self.ias = IAS()
-        self.ias.load_state_dict(torch.load(args.ias))
-
-        for name in ['enc_1', 'enc_2', 'enc_3', 'enc_4', 'ias']:
+        for name in ['enc_1', 'enc_2', 'enc_3', 'enc_4']:
             for param in getattr(self, name).parameters():
                 param.requires_grad = False
 
@@ -58,10 +54,6 @@ class Net(nn.Module):
         return self.mse_loss(input_mean, target_mean) + \
                self.mse_loss(input_std, target_std)
 
-    def get_color_feat(self, imgs):
-        color_feat = self.ias.predict_color(imgs)
-        return color_feat
-
     def c_s_loss(self, pred_l, content_l, style_l):
         pred_l = pred_l.repeat(1, 3, 1, 1)
         input_feats = self.encode_with_intermediate(pred_l)
@@ -86,13 +78,6 @@ class Net(nn.Module):
         for i in range(1, len(input_a) - 1):
             loss_a += self.calc_style_loss(input_a[i], target_a[i])
 
-        return loss_a
-
-    def a_loss_true(self, pred_ab, aest_ab):
-        input_cord = self.ias.predict_color(pred_ab)
-        target_cord = self.ias.predict_color(aest_ab)
-
-        loss_a = self.mse_loss(input_cord, target_cord)
         return loss_a
 
     def forward(self, content_l, content_ab, style_l, aest_ab, debug=False):

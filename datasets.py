@@ -29,20 +29,16 @@ def test_transform(size, crop):
     return transform
 
 class ColorDataset(data.Dataset):
-    def __init__(self, root, img_size, gray_only = False, return_rgb = False):
+    def __init__(self, root, img_size, gray_only = False):
         super(ColorDataset, self).__init__()
         self.root = root
         self.paths = list(Path(self.root).glob('*'))
         self.img_size = img_size
         self.gray_only = gray_only
-        self.return_rgb = return_rgb
 
     def __getitem__(self, index):
         path = self.paths[index]
         rgb_image = Image.open(str(path)).convert('RGB')
-        if self.return_rgb:
-            transform = train_transform(self.img_size)
-            rgb_image_return = train_transform(rgb_image)
         w, h = rgb_image.size
         if w != h:
             min_val = min(w, h)
@@ -65,10 +61,7 @@ class ColorDataset(data.Dataset):
         ab_image = torch.from_numpy(np.transpose(ab_image, (2, 0, 1)).astype(np.float32))
         zero = torch.zeros((1, ab_image.shape[1], ab_image.shape[2]))
         ab_image = torch.cat([zero, ab_image], dim=0)
-        if self.return_rgb:
-            return l_image, ab_image, rgb_image_return
-        else:
-            return l_image, ab_image
+        return l_image, ab_image
 
     def get_img_path(self, index):
         path = self.paths[index]
