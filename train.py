@@ -48,7 +48,6 @@ def train(args):
     # Prepare network
 
     network = Net(args)
-    network.ias.load_state_dict(torch.load(args.ias))
     network.train()
     network.to(device)
 

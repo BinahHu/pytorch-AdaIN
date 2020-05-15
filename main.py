@@ -13,7 +13,7 @@ def Args():
                         help='Directory path to a batch of style images')
     parser.add_argument('--aest_dir', type=str, required=True,
                         help='Directory path to a batch of Aesthetic images')
-    parser.add_argument('--network', type=str, default='')
+    parser.add_argument('--network', type=str, default='models/net_5w.pth')
     parser.add_argument('--vgg', type=str, default='models/vgg_normalised.pth')
     parser.add_argument('--ias', type=str, default='models/ias_color.pth')
     parser.add_argument('--out_root', type=str, default='output/')
