@@ -11,9 +11,9 @@ Image.MAX_IMAGE_PIXELS = None  # Disable DecompressionBombError
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-def train_transform():
+def train_transform(img_size):
     transform_list = [
-        transforms.Resize(size=(256, 256)),
+        transforms.Resize(size=(img_size, img_size)),
         transforms.ToTensor()
     ]
     return transforms.Compose(transform_list)
@@ -29,16 +29,20 @@ def test_transform(size, crop):
     return transform
 
 class ColorDataset(data.Dataset):
-    def __init__(self, root, img_size, gray_only = False):
+    def __init__(self, root, img_size, gray_only = False, return_rgb = False):
         super(ColorDataset, self).__init__()
         self.root = root
         self.paths = list(Path(self.root).glob('*'))
         self.img_size = img_size
         self.gray_only = gray_only
+        self.return_rgb = return_rgb
 
     def __getitem__(self, index):
         path = self.paths[index]
         rgb_image = Image.open(str(path)).convert('RGB')
+        if self.return_rgb:
+            transform = train_transform(self.img_size)
+            rgb_image_return = train_transform(rgb_image)
         w, h = rgb_image.size
         if w != h:
             min_val = min(w, h)
@@ -54,12 +58,17 @@ class ColorDataset(data.Dataset):
         ab_image = np.concatenate((a_image, b_image), axis=2)
 
 
-        l_image = torch.from_numpy(np.transpose(l_image, (2, 0, 1)).astype(np.float32))
+        l_image = torch.from_numpy(np.transpose(l_image, (2, 0, 1)).astype(np.float32)).repeat((3, 1, 1))
         if self.gray_only:
             return l_image
 
         ab_image = torch.from_numpy(np.transpose(ab_image, (2, 0, 1)).astype(np.float32))
-        return l_image, ab_image
+        zero = torch.zeros((1, ab_image.shape[1], ab_image.shape[2]))
+        ab_image = torch.cat([zero, ab_image], dim=0)
+        if self.return_rgb:
+            return l_image, ab_image, rgb_image_return
+        else:
+            return l_image, ab_image
 
     def get_img_path(self, index):
         path = self.paths[index]
